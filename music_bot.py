@@ -235,6 +235,8 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
         'quiet': True,
         'no_warnings': True,
         'format': 'bestaudio/best',
+        'nocheckcertificate': True,
+        'geo_bypass': True,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
