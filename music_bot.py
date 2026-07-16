@@ -233,18 +233,17 @@ def process_text_search(message, status_msg, query):
     except Exception as e:
         bot.edit_message_text("❌ حدث خطأ أثناء البحث، يرجى المحاولة لاحقاً.", chat_id=chat_id, message_id=status_msg.message_id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("play_music|") or call.data.startswith("dl_file|"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("play_music|") or call.data.startswith("dl_file|") or call.data.startswith("dl_doc|"))
 def handle_music_selection(call):
     action, url = call.data.split("|", 1)
-    is_document = (action == "dl_file")
+    is_document = (action == "dl_doc")
     
     if is_document:
-        bot.answer_callback_query(call.id, "⏳ جاري تحميل وحفظ ملف الـ MP3...")
-        status_msg = bot.send_message(call.message.chat.id, "⏳ <b>جاري استخراج وتحميل الملف كأوديو MP3 للحفظ في هاتفك...</b> ⬇️")
+        bot.answer_callback_query(call.id, "⏳ جاري إرسال المقطع كملف مرفق (Document)...")
+        status_msg = bot.send_message(call.message.chat.id, "⏳ <b>جاري تجهيز الملف المرفق للحفظ المباشر...</b> 📄")
     else:
-        # بدون رسالة انتظار للاستماع المباشر ليتم التشغيل فوراً وبسلاسة
-        bot.answer_callback_query(call.id, "🎧 جاري التشغيل المباشر...")
-        status_msg = None
+        bot.answer_callback_query(call.id, "🎧 جاري تحميل وتشغيل المقطع الصوتي على البوت...")
+        status_msg = bot.send_message(call.message.chat.id, "⏳ <b>[1/3] جاري جلب وتحميل المقطع كصوت مباشر على البوت...</b> 🎶")
     
     threading.Thread(
         target=download_and_send_song,
@@ -395,21 +394,21 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
 
         with open(downloaded_file, 'rb') as f:
             if is_document:
-                # إرسال كملف أوديو MP3 للحفظ المباشر
+                # إرسال كملف مرفق (Document) لمن طلبه خصيصاً
                 bot.send_document(
                     chat_id,
                     f,
-                    caption="⬇️ <b>ملف الـ MP3 الأصلي جاهز للحفظ في جهازك</b> 🎶",
+                    caption="📄 <b>ملف الـ MP3 كمرفق (Document) جاهز للحفظ</b> 🎶",
                     reply_to_message_id=None
                 )
             else:
-                # إرسال كمشغل موسيقى للاستماع، ومعه زر تحميل الملف بالأسفل
+                # إرسال كمشغل موسيقى للاستماع والتشغيل المباشر على البوت
                 markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("⬇️ تحميل وحفظ كملف MP3 الأصلي للهاتف", callback_data=f"dl_file|{target_url}"))
+                markup.add(types.InlineKeyboardButton("📄 إرسال كملف مرفق (Document) للملفات", callback_data=f"dl_doc|{target_url}"))
                 bot.send_audio(
                     chat_id,
                     f,
-                    caption="", # صوت نظيف
+                    caption="🎧 <b>تم التحميل كمشغل صوتي جاهز للاستماع على البوت</b> 🎶\n<i>للحفظ في الجوال اضغط على (⋮) واختار حفظ في الموسيقى، أو اضغط الزر أدناه لإرساله كملف</i> 👇",
                     title=song_title,
                     performer=artist_name,
                     reply_to_message_id=None,
