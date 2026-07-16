@@ -343,10 +343,11 @@ def run_bot_polling():
             print(f"[ERROR] Music Bot polling restart due to: {e}")
             time.sleep(5)
 
+# تشغيل البوت في مسار منفصل (Background Thread) ليعمل سواء عبر python مباشرة أو عبر gunicorn في السحابة
+polling_thread = threading.Thread(target=run_bot_polling, daemon=True)
+polling_thread.start()
+
 if __name__ == "__main__":
     print("[INFO] Smart Music Bot is starting...")
-    polling_thread = threading.Thread(target=run_bot_polling, daemon=True)
-    polling_thread.start()
-    
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
