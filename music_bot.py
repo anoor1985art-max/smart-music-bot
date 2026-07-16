@@ -257,8 +257,8 @@ def handle_music_selection(call):
     
     bot.answer_callback_query(call.id, "⏳ جاري التحميل والتشغيل على البوت...", show_alert=False)
     
-    # تحديث الزر نفسه بمؤشر تحميل مباشر دون إرسال رسائل أسفل الشاشة
-    update_inline_button_progress(call.message.chat.id, call.message, call.data, "⏳ جاري التحميل ▓▓░░░ [1/3]")
+    # تحديث الزر نفسه بنص "جاري التحميل 100%" فقط كما طلب المستخدم
+    update_inline_button_progress(call.message.chat.id, call.message, call.data, "جاري التحميل 100%")
     
     threading.Thread(
         target=download_and_send_song,
@@ -333,7 +333,7 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
             except Exception:
                 pass
         elif call_msg and clicked_data:
-            update_inline_button_progress(chat_id, call_msg, clicked_data, "⏳ جاري التجهيز ▓▓▓░░ [1/3]")
+            update_inline_button_progress(chat_id, call_msg, clicked_data, "جاري التحميل 100%")
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -357,7 +357,7 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                     except Exception:
                         pass
                 elif call_msg and clicked_data:
-                    update_inline_button_progress(chat_id, call_msg, clicked_data, "⚡ سحاب سريع ▓▓▓▓░ [2/3]")
+                    update_inline_button_progress(chat_id, call_msg, clicked_data, "جاري التحميل 100%")
                 try:
                     cobalt_url = "https://api.cobalt.tools/api/json"
                     payload = {'url': target_url, 'downloadMode': 'audio', 'audioFormat': 'mp3'}
@@ -386,7 +386,7 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                     except Exception:
                         pass
                 elif call_msg and clicked_data:
-                    update_inline_button_progress(chat_id, call_msg, clicked_data, "🔄 جلب الأصل ▓▓▓▓▓ [3/3]")
+                    update_inline_button_progress(chat_id, call_msg, clicked_data, "جاري التحميل 100%")
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(f"scsearch1:{sc_query}", download=True)
                     if info and 'entries' in info and info['entries']:
