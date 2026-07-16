@@ -250,6 +250,14 @@ def update_inline_button_progress(chat_id, message, clicked_data, new_text):
     except Exception:
         pass
 
+def simulate_percentage_progress(chat_id, message, clicked_data, stop_event):
+    percentages = [15, 30, 45, 60, 75, 88, 95]
+    for p in percentages:
+        if stop_event.is_set():
+            break
+        update_inline_button_progress(chat_id, message, clicked_data, f"⏳ جاري التحميل {p}%")
+        time.sleep(1.2)
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("play_music|") or call.data.startswith("dl_file|") or call.data.startswith("dl_doc|"))
 def handle_music_selection(call):
     action, url = call.data.split("|", 1)
@@ -257,15 +265,21 @@ def handle_music_selection(call):
     
     bot.answer_callback_query(call.id, "⏳ جاري التحميل والتشغيل على البوت...", show_alert=False)
     
-    # تحديث الزر نفسه بنص "جاري التحميل 100%" فقط كما طلب المستخدم
-    update_inline_button_progress(call.message.chat.id, call.message, call.data, "جاري التحميل 100%")
+    stop_event = threading.Event()
+    update_inline_button_progress(call.message.chat.id, call.message, call.data, "⏳ جاري التحميل 10%")
+    
+    threading.Thread(
+        target=simulate_percentage_progress,
+        args=(call.message.chat.id, call.message, call.data, stop_event),
+        daemon=True
+    ).start()
     
     threading.Thread(
         target=download_and_send_song,
-        args=(call.message.chat.id, url, None, False, is_document, call.message, call.data)
+        args=(call.message.chat.id, url, None, False, is_document, call.message, call.data, stop_event)
     ).start()
 
-def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=False, is_document=False, call_msg=None, clicked_data=None):
+def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=False, is_document=False, call_msg=None, clicked_data=None, stop_event=None):
     unique_id = uuid.uuid4().hex[:8]
     output_template = os.path.join(DOWNLOAD_DIR, f"{unique_id}_%(title).50s.%(ext)s")
 
@@ -332,8 +346,6 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                 bot.edit_message_text("⏳ <b>[1/3] جاري استخراج الصوت ومعالجة الملف...</b> ⬇️", chat_id=chat_id, message_id=status_msg.message_id)
             except Exception:
                 pass
-        elif call_msg and clicked_data:
-            update_inline_button_progress(chat_id, call_msg, clicked_data, "جاري التحميل 100%")
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -356,8 +368,6 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                         bot.edit_message_text("⚡ <b>[2/3] جاري التحميل فائق السرعة عبر السحاب (Cobalt API)...</b> ⬇️", chat_id=chat_id, message_id=status_msg.message_id)
                     except Exception:
                         pass
-                elif call_msg and clicked_data:
-                    update_inline_button_progress(chat_id, call_msg, clicked_data, "جاري التحميل 100%")
                 try:
                     cobalt_url = "https://api.cobalt.tools/api/json"
                     payload = {'url': target_url, 'downloadMode': 'audio', 'audioFormat': 'mp3'}
@@ -385,8 +395,6 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                         bot.edit_message_text(f"🔄 <b>[3/3] جاري جلب الملف الأصلي من SoundCloud:</b>\n<i>«{extracted_title[:45]}»</i> 🎶", chat_id=chat_id, message_id=status_msg.message_id)
                     except Exception:
                         pass
-                elif call_msg and clicked_data:
-                    update_inline_button_progress(chat_id, call_msg, clicked_data, "جاري التحميل 100%")
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(f"scsearch1:{sc_query}", download=True)
                     if info and 'entries' in info and info['entries']:
@@ -412,6 +420,11 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                 bot.edit_message_text("📤 <b>اكتمل التجهيز! جاري إرسال المقطع الآن...</b> ⚡", chat_id=chat_id, message_id=status_msg.message_id)
             except Exception:
                 pass
+
+        if stop_event:
+            stop_event.set()
+        if call_msg and clicked_data:
+            update_inline_button_progress(chat_id, call_msg, clicked_data, "⏳ جاري التحميل 100%")
 
         with open(downloaded_file, 'rb') as f:
             if is_document:
@@ -439,9 +452,11 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
             except Exception:
                 pass
         elif call_msg and clicked_data:
-            update_inline_button_progress(chat_id, call_msg, clicked_data, "✅ تم التشغيل")
+            update_inline_button_progress(chat_id, call_msg, clicked_data, "✅ تم التشغيل" if not is_document else "✅ تم التحميل")
 
     except Exception as e:
+        if stop_event:
+            stop_event.set()
         if status_msg:
             try:
                 bot.edit_message_text(f"❌ عذراً، تعذر جلب الملف الصوتي: {e}", chat_id=chat_id, message_id=status_msg.message_id)
