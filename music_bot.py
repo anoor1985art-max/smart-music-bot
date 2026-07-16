@@ -30,6 +30,9 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
+# ذاكرة تخزين مؤقت لعناوين الأغاني التي يتم البحث عنها لضمان دقة التحميل 100%
+SONG_CACHE = {}
+
 # ==========================================
 # الترحيب والقوائم التفاعلية
 # ==========================================
@@ -187,6 +190,7 @@ def process_text_search(message, status_msg, query):
                             dur_str = f"[{duration//60}:{duration%60:02d}]" if duration else ""
                             if url:
                                 results.append({'title': title, 'url': url, 'dur': dur_str})
+                                SONG_CACHE[url] = {'title': title, 'uploader': entry.get('uploader') or entry.get('channel') or 'YouTube Music'}
         except Exception as search_err:
             print(f"[WARNING] YouTube search blocked on cloud IP, trying SoundCloud: {search_err}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -200,6 +204,7 @@ def process_text_search(message, status_msg, query):
                             dur_str = f"[{duration//60}:{duration%60:02d}]" if duration else ""
                             if url:
                                 results.append({'title': title, 'url': url, 'dur': dur_str})
+                                SONG_CACHE[url] = {'title': title, 'uploader': entry.get('uploader') or 'SoundCloud Music'}
 
         if not results:
             bot.edit_message_text("❌ لم أتمكن من العثور على نتائج مطابقة لهذا البحث. جرب كلمات أخرى.", chat_id=chat_id, message_id=status_msg.message_id)
@@ -273,19 +278,38 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
     target_url = url_or_query if (url_or_query.startswith('http://') or url_or_query.startswith('https://')) else f"ytsearch1:{url_or_query}"
 
     extracted_title = url_or_query
+    extracted_artist = "AI Music Bot"
+
+    # 1. جلب العنوان بدقة متناهية من الذاكرة المؤقتة أو عبر oEmbed دون تحميل
     if url_or_query.startswith("http://") or url_or_query.startswith("https://"):
-        try:
-            with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True, 'nocheckcertificate': True}) as ydl_meta:
-                meta = ydl_meta.extract_info(url_or_query, download=False)
-                if meta and meta.get('title'):
-                    extracted_title = meta.get('title')
-        except Exception as meta_err:
-            print(f"[INFO] Title extraction fallback: {meta_err}")
+        if url_or_query in SONG_CACHE:
+            extracted_title = SONG_CACHE[url_or_query].get('title', url_or_query)
+            extracted_artist = SONG_CACHE[url_or_query].get('uploader', extracted_artist)
+        else:
+            try:
+                # oEmbed السريع من يوتيوب يعمل دائماً وبدون حظر
+                r = requests.get(f"https://www.youtube.com/oembed?url={url_or_query}&format=json", timeout=6)
+                if r.status_code == 200:
+                    data = r.json()
+                    extracted_title = data.get('title', url_or_query)
+                    extracted_artist = data.get('author_name', extracted_artist)
+            except Exception as oemb_err:
+                print(f"[INFO] oEmbed fallback: {oemb_err}")
+
+            if extracted_title == url_or_query:
+                try:
+                    with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True, 'nocheckcertificate': True}) as ydl_meta:
+                        meta = ydl_meta.extract_info(url_or_query, download=False)
+                        if meta and meta.get('title'):
+                            extracted_title = meta.get('title')
+                            extracted_artist = meta.get('uploader') or extracted_artist
+                except Exception as meta_err:
+                    print(f"[INFO] Title extraction fallback: {meta_err}")
 
     try:
         downloaded_file = None
         song_title = extracted_title if extracted_title != url_or_query else "موسيقى MP3"
-        artist_name = "AI Music Bot"
+        artist_name = extracted_artist if extracted_artist != "AI Music Bot" else "Universal Music"
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -294,7 +318,7 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                     if 'entries' in info and info['entries']:
                         info = info['entries'][0]
                     song_title = info.get('title', song_title)
-                    artist_name = info.get('uploader') or info.get('artist') or 'Universal Music'
+                    artist_name = info.get('uploader') or info.get('artist') or artist_name
                     fname = ydl.prepare_filename(info)
                     fname = os.path.splitext(fname)[0] + '.mp3'
                     if os.path.exists(fname):
@@ -315,10 +339,11 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                         downloaded_file = fname
                         if extracted_title != url_or_query:
                             song_title = extracted_title
+                            artist_name = extracted_artist
                 except Exception as cob_err:
                     print(f"[ERROR] Cobalt API fallback failed: {cob_err}")
 
-            # 2. إذا فشل يوتيوب، نحاول البحث والتحميل من SoundCloud باستخدام العنوان الدقيق للأغنية بدلاً من كلمة music
+            # 2. إذا فشل يوتيوب، نحاول البحث والتحميل من SoundCloud باستخدام العنوان الدقيق للأغنية
             if not downloaded_file:
                 sc_query = url_or_query if not url_or_query.startswith("http") else extracted_title
                 if sc_query.startswith("http") or not sc_query.strip():
@@ -329,7 +354,7 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                     if info and 'entries' in info and info['entries']:
                         info = info['entries'][0]
                         song_title = info.get('title', song_title)
-                        artist_name = info.get('uploader') or info.get('artist') or 'SoundCloud Music'
+                        artist_name = info.get('uploader') or info.get('artist') or artist_name
                         fname = ydl.prepare_filename(info)
                         fname = os.path.splitext(fname)[0] + '.mp3'
                         if os.path.exists(fname):
