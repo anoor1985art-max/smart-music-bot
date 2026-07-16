@@ -272,9 +272,19 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
 
     target_url = url_or_query if (url_or_query.startswith('http://') or url_or_query.startswith('https://')) else f"ytsearch1:{url_or_query}"
 
+    extracted_title = url_or_query
+    if url_or_query.startswith("http://") or url_or_query.startswith("https://"):
+        try:
+            with yt_dlp.YoutubeDL({'quiet': True, 'extract_flat': True, 'nocheckcertificate': True}) as ydl_meta:
+                meta = ydl_meta.extract_info(url_or_query, download=False)
+                if meta and meta.get('title'):
+                    extracted_title = meta.get('title')
+        except Exception as meta_err:
+            print(f"[INFO] Title extraction fallback: {meta_err}")
+
     try:
         downloaded_file = None
-        song_title = "موسيقى MP3"
+        song_title = extracted_title if extracted_title != url_or_query else "موسيقى MP3"
         artist_name = "AI Music Bot"
 
         try:
@@ -283,7 +293,7 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                 if info:
                     if 'entries' in info and info['entries']:
                         info = info['entries'][0]
-                    song_title = info.get('title', 'موسيقى MP3')
+                    song_title = info.get('title', song_title)
                     artist_name = info.get('uploader') or info.get('artist') or 'Universal Music'
                     fname = ydl.prepare_filename(info)
                     fname = os.path.splitext(fname)[0] + '.mp3'
@@ -303,18 +313,22 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                         with open(fname, 'wb') as f:
                             f.write(audio_data)
                         downloaded_file = fname
-                        song_title = "مقطع صوتي MP3"
+                        if extracted_title != url_or_query:
+                            song_title = extracted_title
                 except Exception as cob_err:
                     print(f"[ERROR] Cobalt API fallback failed: {cob_err}")
 
-            # 2. إذا فشل يوتيوب، نحاول البحث والتحميل من SoundCloud (لا يطلب تسجيل الدخول أبداً)
+            # 2. إذا فشل يوتيوب، نحاول البحث والتحميل من SoundCloud باستخدام العنوان الدقيق للأغنية بدلاً من كلمة music
             if not downloaded_file:
-                sc_query = url_or_query if not url_or_query.startswith("http") else "music"
+                sc_query = url_or_query if not url_or_query.startswith("http") else extracted_title
+                if sc_query.startswith("http") or not sc_query.strip():
+                    sc_query = "موسيقى"
+                print(f"[INFO] Searching SoundCloud for exact title: {sc_query}")
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(f"scsearch1:{sc_query}", download=True)
                     if info and 'entries' in info and info['entries']:
                         info = info['entries'][0]
-                        song_title = info.get('title', 'موسيقى MP3')
+                        song_title = info.get('title', song_title)
                         artist_name = info.get('uploader') or info.get('artist') or 'SoundCloud Music'
                         fname = ydl.prepare_filename(info)
                         fname = os.path.splitext(fname)[0] + '.mp3'
