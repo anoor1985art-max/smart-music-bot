@@ -233,24 +233,39 @@ def process_text_search(message, status_msg, query):
     except Exception as e:
         bot.edit_message_text("❌ حدث خطأ أثناء البحث، يرجى المحاولة لاحقاً.", chat_id=chat_id, message_id=status_msg.message_id)
 
+def update_inline_button_progress(chat_id, message, clicked_data, new_text):
+    if not message or not message.reply_markup or not message.reply_markup.keyboard:
+        return
+    try:
+        updated_keyboard = []
+        for row in message.reply_markup.keyboard:
+            new_row = []
+            for btn in row:
+                if btn.callback_data == clicked_data:
+                    new_row.append(types.InlineKeyboardButton(new_text, callback_data=btn.callback_data))
+                else:
+                    new_row.append(btn)
+            updated_keyboard.append(new_row)
+        bot.edit_message_reply_markup(chat_id, message.message_id, reply_markup=types.InlineKeyboardMarkup(keyboard=updated_keyboard))
+    except Exception:
+        pass
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("play_music|") or call.data.startswith("dl_file|") or call.data.startswith("dl_doc|"))
 def handle_music_selection(call):
     action, url = call.data.split("|", 1)
     is_document = (action == "dl_doc")
     
-    if is_document:
-        bot.answer_callback_query(call.id, "⏳ جاري إرسال المقطع كملف مرفق (Document)...")
-        status_msg = bot.send_message(call.message.chat.id, "⏳ <b>جاري تجهيز الملف المرفق للحفظ المباشر...</b> 📄")
-    else:
-        bot.answer_callback_query(call.id, "🎧 جاري تحميل وتشغيل المقطع الصوتي على البوت...")
-        status_msg = bot.send_message(call.message.chat.id, "⏳ <b>[1/3] جاري جلب وتحميل المقطع كصوت مباشر على البوت...</b> 🎶")
+    bot.answer_callback_query(call.id, "⏳ جاري التحميل والتشغيل على البوت...", show_alert=False)
+    
+    # تحديث الزر نفسه بمؤشر تحميل مباشر دون إرسال رسائل أسفل الشاشة
+    update_inline_button_progress(call.message.chat.id, call.message, call.data, "⏳ جاري التحميل ▓▓░░░ [1/3]")
     
     threading.Thread(
         target=download_and_send_song,
-        args=(call.message.chat.id, url, status_msg, False, is_document)
+        args=(call.message.chat.id, url, None, False, is_document, call.message, call.data)
     ).start()
 
-def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=False, is_document=False):
+def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=False, is_document=False, call_msg=None, clicked_data=None):
     unique_id = uuid.uuid4().hex[:8]
     output_template = os.path.join(DOWNLOAD_DIR, f"{unique_id}_%(title).50s.%(ext)s")
 
@@ -317,6 +332,8 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                 bot.edit_message_text("⏳ <b>[1/3] جاري استخراج الصوت ومعالجة الملف...</b> ⬇️", chat_id=chat_id, message_id=status_msg.message_id)
             except Exception:
                 pass
+        elif call_msg and clicked_data:
+            update_inline_button_progress(chat_id, call_msg, clicked_data, "⏳ جاري التجهيز ▓▓▓░░ [1/3]")
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -339,6 +356,8 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                         bot.edit_message_text("⚡ <b>[2/3] جاري التحميل فائق السرعة عبر السحاب (Cobalt API)...</b> ⬇️", chat_id=chat_id, message_id=status_msg.message_id)
                     except Exception:
                         pass
+                elif call_msg and clicked_data:
+                    update_inline_button_progress(chat_id, call_msg, clicked_data, "⚡ سحاب سريع ▓▓▓▓░ [2/3]")
                 try:
                     cobalt_url = "https://api.cobalt.tools/api/json"
                     payload = {'url': target_url, 'downloadMode': 'audio', 'audioFormat': 'mp3'}
@@ -366,6 +385,8 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                         bot.edit_message_text(f"🔄 <b>[3/3] جاري جلب الملف الأصلي من SoundCloud:</b>\n<i>«{extracted_title[:45]}»</i> 🎶", chat_id=chat_id, message_id=status_msg.message_id)
                     except Exception:
                         pass
+                elif call_msg and clicked_data:
+                    update_inline_button_progress(chat_id, call_msg, clicked_data, "🔄 جلب الأصل ▓▓▓▓▓ [3/3]")
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(f"scsearch1:{sc_query}", download=True)
                     if info and 'entries' in info and info['entries']:
@@ -394,25 +415,22 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
 
         with open(downloaded_file, 'rb') as f:
             if is_document:
-                # إرسال كملف مرفق (Document) لمن طلبه خصيصاً
                 bot.send_document(
                     chat_id,
                     f,
-                    caption="📄 <b>ملف الـ MP3 كمرفق (Document) جاهز للحفظ</b> 🎶",
+                    caption="",
                     reply_to_message_id=None
                 )
             else:
-                # إرسال كمشغل موسيقى للاستماع والتشغيل المباشر على البوت
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("📄 إرسال كملف مرفق (Document) للملفات", callback_data=f"dl_doc|{target_url}"))
+                # إرسال هادئ ونظيف جداً وبدون أي نص شرح أو زر أسفل المشغل كما طلب المستخدم
                 bot.send_audio(
                     chat_id,
                     f,
-                    caption="🎧 <b>تم التحميل كمشغل صوتي جاهز للاستماع على البوت</b> 🎶\n<i>للحفظ في الجوال اضغط على (⋮) واختار حفظ في الموسيقى، أو اضغط الزر أدناه لإرساله كملف</i> 👇",
+                    caption="",
                     title=song_title,
                     performer=artist_name,
                     reply_to_message_id=None,
-                    reply_markup=markup
+                    reply_markup=None
                 )
 
         if status_msg:
@@ -420,6 +438,8 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                 bot.delete_message(chat_id, status_msg.message_id)
             except Exception:
                 pass
+        elif call_msg and clicked_data:
+            update_inline_button_progress(chat_id, call_msg, clicked_data, "✅ تم التشغيل")
 
     except Exception as e:
         if status_msg:
@@ -427,6 +447,8 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                 bot.edit_message_text(f"❌ عذراً، تعذر جلب الملف الصوتي: {e}", chat_id=chat_id, message_id=status_msg.message_id)
             except Exception:
                 pass
+        elif call_msg and clicked_data:
+            update_inline_button_progress(chat_id, call_msg, clicked_data, "❌ تعذر جلب المقطع")
         else:
             bot.send_message(chat_id, f"❌ عذراً، تعذر جلب المقطع الصوتي: {e}")
     finally:
