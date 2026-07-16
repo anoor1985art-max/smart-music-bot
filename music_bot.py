@@ -261,6 +261,8 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
         'quiet': True,
         'no_warnings': True,
         'format': 'bestaudio/best',
+        'socket_timeout': 7,
+        'retries': 1,
         'nocheckcertificate': True,
         'geo_bypass': True,
         'extractor_args': {
@@ -311,6 +313,12 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
         song_title = extracted_title if extracted_title != url_or_query else "موسيقى MP3"
         artist_name = extracted_artist if extracted_artist != "AI Music Bot" else "Universal Music"
 
+        if status_msg:
+            try:
+                bot.edit_message_text("⏳ <b>[1/3] جاري استخراج الصوت ومعالجة الملف...</b> ⬇️", chat_id=chat_id, message_id=status_msg.message_id)
+            except Exception:
+                pass
+
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(target_url, download=True)
@@ -327,6 +335,11 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
             print(f"[WARNING] yt-dlp mobile client failed ({yt_err}), trying fallback methods...")
             # 1. محاولة التحميل عبر السحاب السريع Cobalt API إذا كان رابط يوتيوب
             if "youtube.com" in target_url or "youtu.be" in target_url or target_url.startswith("http"):
+                if status_msg:
+                    try:
+                        bot.edit_message_text("⚡ <b>[2/3] جاري التحميل فائق السرعة عبر السحاب (Cobalt API)...</b> ⬇️", chat_id=chat_id, message_id=status_msg.message_id)
+                    except Exception:
+                        pass
                 try:
                     cobalt_url = "https://api.cobalt.tools/api/json"
                     payload = {'url': target_url, 'downloadMode': 'audio', 'audioFormat': 'mp3'}
@@ -349,6 +362,11 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                 if sc_query.startswith("http") or not sc_query.strip():
                     sc_query = "موسيقى"
                 print(f"[INFO] Searching SoundCloud for exact title: {sc_query}")
+                if status_msg:
+                    try:
+                        bot.edit_message_text(f"🔄 <b>[3/3] جاري جلب الملف الأصلي من SoundCloud:</b>\n<i>«{extracted_title[:45]}»</i> 🎶", chat_id=chat_id, message_id=status_msg.message_id)
+                    except Exception:
+                        pass
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(f"scsearch1:{sc_query}", download=True)
                     if info and 'entries' in info and info['entries']:
