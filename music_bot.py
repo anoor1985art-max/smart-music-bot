@@ -158,27 +158,48 @@ def process_text_search(message, status_msg, query):
             download_and_send_song(chat_id, query, status_msg, is_direct_query=True)
             return
 
-        # البحث عبر محرك yt-dlp عن أفضل 5 نتائج
+        # البحث عبر محرك yt-dlp باستخدام عملاء الجوال لتخطي حماية يوتيوب
         ydl_opts = {
             'ffmpeg_location': FFMPEG_PATH,
             'quiet': True,
             'no_warnings': True,
             'extract_flat': True,
+            'nocheckcertificate': True,
+            'geo_bypass': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb']
+                }
+            }
         }
         search_url = f"ytsearch5:{query}"
         results = []
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(search_url, download=False)
-            if info and 'entries' in info:
-                for entry in info['entries']:
-                    if entry:
-                        title = entry.get('title', 'بدون عنوان')
-                        url = entry.get('url') or entry.get('webpage_url')
-                        duration = entry.get('duration')
-                        dur_str = f"[{duration//60}:{duration%60:02d}]" if duration else ""
-                        if url:
-                            results.append({'title': title, 'url': url, 'dur': dur_str})
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(search_url, download=False)
+                if info and 'entries' in info:
+                    for entry in info['entries']:
+                        if entry:
+                            title = entry.get('title', 'بدون عنوان')
+                            url = entry.get('url') or entry.get('webpage_url')
+                            duration = entry.get('duration')
+                            dur_str = f"[{duration//60}:{duration%60:02d}]" if duration else ""
+                            if url:
+                                results.append({'title': title, 'url': url, 'dur': dur_str})
+        except Exception as search_err:
+            print(f"[WARNING] YouTube search blocked on cloud IP, trying SoundCloud: {search_err}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"scsearch5:{query}", download=False)
+                if info and 'entries' in info:
+                    for entry in info['entries']:
+                        if entry:
+                            title = entry.get('title', 'بدون عنوان')
+                            url = entry.get('url') or entry.get('webpage_url')
+                            duration = entry.get('duration')
+                            dur_str = f"[{duration//60}:{duration%60:02d}]" if duration else ""
+                            if url:
+                                results.append({'title': title, 'url': url, 'dur': dur_str})
 
         if not results:
             bot.edit_message_text("❌ لم أتمكن من العثور على نتائج مطابقة لهذا البحث. جرب كلمات أخرى.", chat_id=chat_id, message_id=status_msg.message_id)
@@ -237,6 +258,11 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
         'format': 'bestaudio/best',
         'nocheckcertificate': True,
         'geo_bypass': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios', 'mweb']
+            }
+        },
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -251,17 +277,49 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
         song_title = "موسيقى MP3"
         artist_name = "AI Music Bot"
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(target_url, download=True)
-            if info:
-                if 'entries' in info and info['entries']:
-                    info = info['entries'][0]
-                song_title = info.get('title', 'موسيقى MP3')
-                artist_name = info.get('uploader') or info.get('artist') or 'Universal Music'
-                fname = ydl.prepare_filename(info)
-                fname = os.path.splitext(fname)[0] + '.mp3'
-                if os.path.exists(fname):
-                    downloaded_file = fname
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(target_url, download=True)
+                if info:
+                    if 'entries' in info and info['entries']:
+                        info = info['entries'][0]
+                    song_title = info.get('title', 'موسيقى MP3')
+                    artist_name = info.get('uploader') or info.get('artist') or 'Universal Music'
+                    fname = ydl.prepare_filename(info)
+                    fname = os.path.splitext(fname)[0] + '.mp3'
+                    if os.path.exists(fname):
+                        downloaded_file = fname
+        except Exception as yt_err:
+            print(f"[WARNING] yt-dlp mobile client failed ({yt_err}), trying fallback methods...")
+            # 1. محاولة التحميل عبر السحاب السريع Cobalt API إذا كان رابط يوتيوب
+            if "youtube.com" in target_url or "youtu.be" in target_url or target_url.startswith("http"):
+                try:
+                    cobalt_url = "https://api.cobalt.tools/api/json"
+                    payload = {'url': target_url, 'downloadMode': 'audio', 'audioFormat': 'mp3'}
+                    r = requests.post(cobalt_url, json=payload, headers={'Accept': 'application/json'}, timeout=15)
+                    if r.status_code == 200 and r.json().get('url'):
+                        audio_data = requests.get(r.json()['url'], timeout=30).content
+                        fname = os.path.join(DOWNLOAD_DIR, f"{unique_id}_audio.mp3")
+                        with open(fname, 'wb') as f:
+                            f.write(audio_data)
+                        downloaded_file = fname
+                        song_title = "مقطع صوتي MP3"
+                except Exception as cob_err:
+                    print(f"[ERROR] Cobalt API fallback failed: {cob_err}")
+
+            # 2. إذا فشل يوتيوب، نحاول البحث والتحميل من SoundCloud (لا يطلب تسجيل الدخول أبداً)
+            if not downloaded_file:
+                sc_query = url_or_query if not url_or_query.startswith("http") else "music"
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(f"scsearch1:{sc_query}", download=True)
+                    if info and 'entries' in info and info['entries']:
+                        info = info['entries'][0]
+                        song_title = info.get('title', 'موسيقى MP3')
+                        artist_name = info.get('uploader') or info.get('artist') or 'SoundCloud Music'
+                        fname = ydl.prepare_filename(info)
+                        fname = os.path.splitext(fname)[0] + '.mp3'
+                        if os.path.exists(fname):
+                            downloaded_file = fname
 
         if not downloaded_file:
             for fname in os.listdir(DOWNLOAD_DIR):
@@ -270,7 +328,7 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                     break
 
         if not downloaded_file or not os.path.exists(downloaded_file):
-            raise Exception("تعذر استخراج الملف الصوتي.")
+            raise Exception("تعذر استخراج الملف الصوتي بسبب قيود الشبكة السحابية.")
 
         if status_msg:
             try:
