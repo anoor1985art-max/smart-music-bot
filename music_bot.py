@@ -446,13 +446,18 @@ def download_and_send_song(chat_id, url_or_query, status_msg, is_direct_query=Fa
                     reply_markup=None
                 )
 
+        if stop_event:
+            stop_event.set()
         if status_msg:
             try:
                 bot.delete_message(chat_id, status_msg.message_id)
             except Exception:
                 pass
-        elif call_msg and clicked_data:
-            update_inline_button_progress(chat_id, call_msg, clicked_data, "✅ تم التشغيل" if not is_document else "✅ تم التحميل")
+        if call_msg:
+            try:
+                bot.delete_message(chat_id, call_msg.message_id)
+            except Exception:
+                pass
 
     except Exception as e:
         if stop_event:
